@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mots cachés</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0; padding: 0;
+      background: #f4f4f4;
+      color: #222;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: hidden;
+    }
+    header { padding: 12px 16px; text-align: center; }
+    h1 { margin: 0; font-size: 1.4rem; }
+    #game {
+      width: 100%;
+      max-width: 440px;
+      padding: 8px 12px 24px;
+    }
+    /* La grille est un canvas-like : taille fixe calculée en JS */
+    #grid-wrap {
+      margin: 10px auto;
+      position: relative;
+      /* width/height posés en JS */
+    }
+    #grid-canvas {
+      display: block;
+      touch-action: none;
+      cursor: crosshair;
+    }
+    #word-list {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .word-item {
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: #fff;
+      border: 1px solid #ccc;
+    }
+    .word-item.found {
+      text-decoration: line-through;
+      background: #b5f5b5;
+      border-color: #3c9c3c;
+      color: #104010;
+    }
+    #hidden-word {
+      margin-top: 14px;
+      font-weight: 700;
+      text-align: center;
+      min-height: 1.4em;
+      font-size: 1rem;
+      color: #c00;
+    }
+    #score {
+      text-align: center;
+      font-size: 13px;
+      color: #555;
+      margin-top: 4px;
+    }
+    #controls {
+      margin-top: 12px;
+      display: flex;
+      justify-content: center;
+    }
+    button {
+      padding: 7px 18px;
+      border-radius: 4px;
+      border: 1px solid #4a90e2;
+      background: #4a90e2;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:active { transform: scale(0.97); }
+  </style>
+</head>
+<body>
+  <header><h1>🔍 Mots cachés</h1></header>
+  <main id="game">
+    <div id="grid-wrap">
+      <canvas id="grid-canvas"></canvas>
+    </div>
+    <div id="score"></div>
+    <div id="word-list"></div>
+    <div id="hidden-word"></div>
+    <div id="controls">
+      <button id="new-game">Nouvelle grille</button>
+    </div>
+  </main>
+
+  <script>
+  // ═══════════════════════════════════════════════════════════
+  //  CONFIG
+  // ═══════════════════════════════════════════════════════════
+  const GRID_SIZE     = 12;
+  const WORDS_TO_PLACE = 8;
+
+  // Taille d'une cellule en pixels (adaptée à l'écran)
+  const CELL = Math.min(30, Math.floor((Math.min(window.innerWidth, 440) - 24) / GRID_SIZE));
+
+  // ═══════════════════════════════════════════════════════════
+  //  DONNÉES
+  // ═══════════════════════════════════════════════════════════
+  const WORDS_VISIBLE = {
+    animaux:  ["CHAT","LION","TIGRE","OURS","RENARD","LOUP","AIGLE","REQUIN","DAUPHIN","VACHE","CHEVAL","COCHON","LAPIN","SERPENT","SINGE","PERROQUET","MOUTON","HIBOU","PANDA","ZÈBRE"],
+    fruits:   ["POMME","BANANE","KIWI","RAISIN","MANGUE","FRAISE","CERISE","ANANAS","PECHE","POIRE","CITRON","ORANGE","PRUNE","MELON","FRAMBOISE","ABRICOT","FIGUE","PAPAYE","GOYAVE","COCO"],
+    sports:   ["FOOT","RUGBY","TENNIS","NATATION","CYCLISME","BOXE","GOLF","BASKET","VOLLEY","HANDBALL","JUDO","KARATE","ESCRIME","AVIRON","SURF","SKI","PATINAGE","LUTTE","TRIATHLON","TIRO"],
+    pays:     ["FRANCE","ESPAGNE","ITALIE","JAPON","CHINE","BRESIL","CANADA","MEXIQUE","INDE","RUSSIE","TURQUIE","EGYPTE","MAROC","ALGERIE","GHANA","IRAN","PEROU","CUBA","CHILI","SUEDE"],
+    couleurs: ["ROUGE","BLEU","VERT","JAUNE","ORANGE","VIOLET","ROSE","GRIS","BLANC","NOIR","BEIGE","CYAN","INDIGO","MARRON","CORAIL","AZUR","OCRE","LILAS","TURQUOISE","ECARLATE"],
+    metiers:  ["MEDECIN","PILOTE","POMPIER","CUISINIER","AVOCAT","JUGE","ACTEUR","DANSEUR","CHANTEUR","PEINTRE","SCULPTEUR","INGENIEUR","ARCHITECTE","INFIRMIER","PHARMACIEN","LIBRAIRE","MENUISIER","PLOMBIER","COIFFEUR","JARDINIER"],
+    nature:   ["FORET","OCEAN","RIVIERE","MONTAGNE","DESERT","PRAIRIE","VOLCAN","GLACIER","FALAISE","LAGUNE","CANYON","DELTA","TOUNDRA","SAVANE","MARAIS","COLLINE","VALLEE","PLATEAU","DUNE","GROTTE"],
+    corps:    ["BRAS","JAMBE","TETE","COEUR","FOIE","REIN","POUMON","GENOU","COUDE","EPAULE","CHEVILLE","POIGNET","NUQUE","MENTON","TEMPE","NARINE","PAUME","TALON","STERNUM","CLAVICULE"],
+  };
+
+  const WORDS_HIDDEN = {
+     8: ["MYSTERE","VICTOIRE","ENIGME","TRESOR"],
+    10: ["AVENTURES","DECOUVERTE","CHAMPIONS"],
+    12: ["RECOMPENSES","MERVEILLEUX","FELICITATION"],
+    14: ["EXTRAORDINAIRE","CONGRATULATION"],
+    16: ["FELICITATIONSJEU","SUPERCHAMPIONS"],
+  };
+
+  const DIRECTIONS = [
+    {dr:0,dc:1},{dr:0,dc:-1},{dr:1,dc:0},{dr:-1,dc:0},
+    {dr:1,dc:1},{dr:1,dc:-1},{dr:-1,dc:1},{dr:-1,dc:-1},
+  ];
+
+  // ═══════════════════════════════════════════════════════════
+  //  UTILITAIRES
+  // ═══════════════════════════════════════════════════════════
+  const randInt = n => Math.floor(Math.random() * n);
+  const choice  = a => a[randInt(a.length)];
+  function shuffle(a) {
+    a = [...a];
+    for (let i = a.length-1; i > 0; i--) {
+      const j = randInt(i+1); [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  GÉNÉRATION
+  // ═══════════════════════════════════════════════════════════
+  function makeGrid(n)  { return Array.from({length:n}, ()=>Array(n).fill(null)); }
+  function makeUsed(n)  { return Array.from({length:n}, ()=>Array(n).fill(false)); }
+
+  function canPlace(grid, word, r0, c0, dir) {
+    const n = grid.length;
+    for (let i = 0; i < word.length; i++) {
+      const r = r0+dir.dr*i, c = c0+dir.dc*i;
+      if (r<0||r>=n||c<0||c>=n) return false;
+      if (grid[r][c] !== null && grid[r][c] !== word[i]) return false;
+    }
+    return true;
+  }
+
+  function placeWord(grid, used, word) {
+    const n = grid.length;
+    const dirs = shuffle(DIRECTIONS);
+    for (let a = 0; a < 300; a++) {
+      const dir = dirs[a % dirs.length];
+      const r0 = randInt(n), c0 = randInt(n);
+      if (!canPlace(grid, word, r0, c0, dir)) continue;
+      for (let i = 0; i < word.length; i++) {
+        const r = r0+dir.dr*i, c = c0+dir.dc*i;
+        grid[r][c] = word[i]; used[r][c] = true;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function fillHidden(grid, used) {
+    const free = [];
+    const n = grid.length;
+    for (let r=0;r<n;r++) for (let c=0;c<n;c++) if (!used[r][c]) free.push([r,c]);
+    const keys = Object.keys(WORDS_HIDDEN).map(Number).sort((a,b)=>a-b);
+    let best = null;
+    for (const k of keys) if (k <= free.length) best = k;
+    if (!best) return null;
+    const word = choice(WORDS_HIDDEN[best]);
+    for (let i=0;i<word.length;i++) { const [r,c]=free[i]; grid[r][c]=word[i]; }
+    return word;
+  }
+
+  function generateGame(depth=0) {
+    if (depth>100) return null;
+    const grid = makeGrid(GRID_SIZE), used = makeUsed(GRID_SIZE);
+    const theme = choice(Object.keys(WORDS_VISIBLE));
+    const pool  = shuffle(WORDS_VISIBLE[theme]).filter(w=>w.length<=GRID_SIZE);
+    const words = [];
+    for (const w of pool) {
+      if (words.length >= WORDS_TO_PLACE) break;
+      if (placeWord(grid, used, w)) words.push(w);
+    }
+    if (words.length < 4) return generateGame(depth+1);
+    const hidden = fillHidden(grid, used);
+    if (!hidden) return generateGame(depth+1);
+    const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (let r=0;r<GRID_SIZE;r++)
+      for (let c=0;c<GRID_SIZE;c++)
+        if (grid[r][c]===null) grid[r][c]=alpha[randInt(alpha.length)];
+    return { grid, words, hiddenWord: hidden, theme };
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CANVAS RENDERER
+  // ═══════════════════════════════════════════════════════════
+  const canvas  = document.getElementById("grid-canvas");
+  const ctx     = canvas.getContext("2d");
+  const wrap    = document.getElementById("grid-wrap");
+
+  // État
+  let game        = null;
+  let foundWords  = new Set();
+  // foundCells[r][c] = true si cette cellule fait partie d'un mot trouvé
+  let foundCells  = [];
+  // selCells = [{r,c}, ...]
+  let selCells    = [];
+  let dragging    = false;
+
+  function initCanvas() {
+    const size = CELL * GRID_SIZE;
+    canvas.width  = size;
+    canvas.height = size;
+    wrap.style.width  = size + "px";
+    wrap.style.height = size + "px";
+  }
+
+  function drawGrid() {
+    if (!game) return;
+    const n = GRID_SIZE;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let r=0; r<n; r++) {
+      for (let c=0; c<n; c++) {
+        const x = c * CELL, y = r * CELL;
+        const isFound = foundCells[r][c];
+        const isSel   = selCells.some(s => s.r===r && s.c===c);
+
+        // fond
+        if (isSel) {
+          ctx.fillStyle = "#cde4ff";
+        } else if (isFound) {
+          ctx.fillStyle = "#b5f5b5";
+        } else {
+          ctx.fillStyle = "#ffffff";
+        }
+        ctx.beginPath();
+        ctx.roundRect(x+1, y+1, CELL-2, CELL-2, 4);
+        ctx.fill();
+
+        // bordure
+        ctx.strokeStyle = isSel ? "#4a90e2" : isFound ? "#3c9c3c" : "#cccccc";
+        ctx.lineWidth = isSel || isFound ? 1.5 : 1;
+        ctx.stroke();
+
+        // lettre
+        ctx.fillStyle = isFound ? "#104010" : "#222222";
+        ctx.font = `bold ${Math.round(CELL*0.5)}px system-ui`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(game.grid[r][c], x + CELL/2, y + CELL/2);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CONVERSION coordonnées → cellule
+  // ═══════════════════════════════════════════════════════════
+  function pointToCell(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    // Tenir compte du scale CSS si l'écran est plus petit
+    const scaleX = canvas.width  / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top)  * scaleY;
+    const c = Math.floor(x / CELL);
+    const r = Math.floor(y / CELL);
+    if (r<0||r>=GRID_SIZE||c<0||c>=GRID_SIZE) return null;
+    return {r, c};
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  LOGIQUE DE SÉLECTION
+  // ═══════════════════════════════════════════════════════════
+  function cellsEqual(a, b) { return a.r===b.r && a.c===b.c; }
+
+  function isValidLine(cells) {
+    if (cells.length <= 1) return true;
+    const dr = Math.sign(cells[1].r - cells[0].r);
+    const dc = Math.sign(cells[1].c - cells[0].c);
+    if (dr===0 && dc===0) return false;
+    for (let i=1; i<cells.length; i++) {
+      if (cells[i].r !== cells[0].r + dr*i) return false;
+      if (cells[i].c !== cells[0].c + dc*i) return false;
+    }
+    return true;
+  }
+
+  function onStart(clientX, clientY) {
+    const cell = pointToCell(clientX, clientY);
+    if (!cell) return;
+    dragging  = true;
+    selCells  = [cell];
+    drawGrid();
+  }
+
+  function onMove(clientX, clientY) {
+    if (!dragging) return;
+    const cell = pointToCell(clientX, clientY);
+    if (!cell) return;
+    // Déjà dernier élément ?
+    if (selCells.length && cellsEqual(selCells[selCells.length-1], cell)) return;
+
+    const candidate = [...selCells, cell];
+    if (!isValidLine(candidate)) {
+      // Réinitialiser la sélection depuis la première cellule jusqu'à cette cellule
+      // si possible en ligne droite, sinon on repart de cette cellule
+      const first = selCells[0];
+      const dr = Math.sign(cell.r - first.r);
+      const dc = Math.sign(cell.c - first.c);
+      if (dr===0 && dc===0) return;
+      // Vérifier que la direction est valide (horizontal/vertical/diagonal 45°)
+      const diffR = Math.abs(cell.r - first.r);
+      const diffC = Math.abs(cell.c - first.c);
+      if (diffR !== 0 && diffC !== 0 && diffR !== diffC) return;
+      // Reconstruire la ligne depuis first jusqu'à cell
+      const newSel = [];
+      let cr = first.r, cc = first.c;
+      while (true) {
+        newSel.push({r:cr, c:cc});
+        if (cr===cell.r && cc===cell.c) break;
+        cr += dr; cc += dc;
+        if (cr<0||cr>=GRID_SIZE||cc<0||cc>=GRID_SIZE) return;
+      }
+      selCells = newSel;
+    } else {
+      selCells = candidate;
+    }
+    drawGrid();
+  }
+
+  function onEnd() {
+    if (!dragging) return;
+    dragging = false;
+    const word    = selCells.map(s => game.grid[s.r][s.c]).join("");
+    const wordRev = word.split("").reverse().join("");
+    const match   = game.words.find(w => w===word || w===wordRev);
+    if (match && !foundWords.has(match)) {
+      foundWords.add(match);
+      selCells.forEach(s => { foundCells[s.r][s.c] = true; });
+      markWordFound(match);
+      updateScore();
+      if (foundWords.size === game.words.length) {
+        setTimeout(() => {
+          document.getElementById("hidden-word").textContent =
+            "🎉 Mot caché : " + game.hiddenWord;
+        }, 200);
+      }
+    }
+    selCells = [];
+    drawGrid();
+  }
+
+  // Touch
+  canvas.addEventListener("touchstart", e => {
+    e.preventDefault();
+    onStart(e.touches[0].clientX, e.touches[0].clientY);
+  }, {passive:false});
+  canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+    onMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, {passive:false});
+  canvas.addEventListener("touchend", e => {
+    e.preventDefault();
+    onEnd();
+  }, {passive:false});
+  canvas.addEventListener("touchcancel", e => {
+    e.preventDefault();
+    selCells = []; dragging = false; drawGrid();
+  }, {passive:false});
+
+  // Pointer (souris / stylet)
+  canvas.addEventListener("pointerdown", e => {
+    if (e.pointerType==="touch") return;
+    onStart(e.clientX, e.clientY);
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (e.pointerType==="touch") return;
+    onMove(e.clientX, e.clientY);
+  });
+  window.addEventListener("pointerup", e => {
+    if (e.pointerType==="touch") return;
+    onEnd();
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  //  UI MOTS
+  // ═══════════════════════════════════════════════════════════
+  function renderWordList(words) {
+    const el = document.getElementById("word-list");
+    el.innerHTML = "";
+    words.forEach(w => {
+      const s = document.createElement("span");
+      s.className = "word-item";
+      s.textContent = w;
+      s.dataset.word = w;
+      el.appendChild(s);
+    });
+  }
+
+  function markWordFound(word) {
+    document.querySelectorAll(".word-item").forEach(el => {
+      if (el.dataset.word===word) el.classList.add("found");
+    });
+  }
+
+  function updateScore() {
+    document.getElementById("score").textContent =
+      `${foundWords.size} / ${game.words.length} mots trouvés`;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  NOUVELLE PARTIE
+  // ═══════════════════════════════════════════════════════════
+  function newGame() {
+    document.getElementById("hidden-word").textContent = "";
+    foundWords = new Set();
+    foundCells = makeUsed(GRID_SIZE); // reset
+    selCells   = [];
+    dragging   = false;
+    game = generateGame();
+    if (!game) return;
+    renderWordList(game.words);
+    updateScore();
+    drawGrid();
+  }
+
+  document.getElementById("new-game").addEventListener("click", newGame);
+
+  initCanvas();
+  newGame();
+  </script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("service-worker.js");
+    }
+  </script>
+</body>
+</html>
