@@ -1,9 +1,10 @@
-const CACHE_NAME = "mots-cache-v1.1.0";
+const CACHE_NAME = "mots-cache-v1.1.1";
 
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
+  "./mots.js",
 
   // Icônes PWA
   "./icone-192.png",
